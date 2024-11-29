@@ -5,3 +5,4 @@ URL for the pdfs: https://map.geo.admin.ch/?lang=de&topic=ech&bgLayer=ch.swissto
     mogrify -format tif pdfs/*.pdf   # also specify output path "tiffs"
     convert -layers optimize -delay 100 tiffs/*.tif gif.gif
 
+Waldentwicklung in Ces, TI
