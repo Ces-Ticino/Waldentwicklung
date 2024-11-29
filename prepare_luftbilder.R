@@ -95,9 +95,32 @@ rasts <- df |>
     
     crs(out2) <- "epsg:2056"
     
-    writeRaster(out2, glue("data-out/{year}.tif"), overwrite = TRUE)
+    writeRaster(out2, glue("data-out/prepared0/{year}.tif"), overwrite = TRUE)
     out2
   }, .progress = TRUE)
+
+
+
+
+## part 2
+
+
+prep0 <- list.files("data-out/prepared0/", "\\.tif$", full.names = TRUE)
+
+names(prep0) <- basename(prep0)
+
+
+imap(prep0, \(x,y){
+  r <- rast(x)  
+  writeRaster(r, glue("data-out/prepared1/{y}"),datatype = "INT1U", overwrite = TRUE)
+})
+
+
+
+
+
+
+
 
 
 

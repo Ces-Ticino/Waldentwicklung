@@ -33,7 +33,7 @@ llur2poly <- \(xmin,ymin,xmax,ymax, crs = 2056){
 focal_circle <- function(ras, radius, fun = "mean", prefix = ""){
   focmat <- focalMat(ras, radius, type="circle",fillNA = TRUE)
   ras_foc <- focal(ras,focmat, fun)
-  names(ras_foc) <- paste(prefix, fun,radius, sep = "_")
+  names(ras_foc) <- paste(names(ras),prefix, fun,radius, sep = "_")
   ras_foc
 }
 
@@ -53,12 +53,14 @@ normalize_minmax <- \(ras){
   (ras-mm[1,])/(mm[2,]- mm[1,])
 }
 
-normalize_zscore <- \(ras){
-  ras_mean <- as.matrix(global(ras,"mean", na.rm = TRUE))[1,]
-  ras_sd <- as.matrix(global(ras,"sd", na.rm = TRUE))[1,]
-  
-  (ras-ras_mean)/ras_sd
-}
+# To use this function, make it work for multiple rasters
+# (similar to normalize_minmax)
+# normalize_zscore <- \(ras){
+#   ras_mean <- as.matrix(global(ras,"mean", na.rm = TRUE))[1,]
+#   ras_sd <- as.matrix(global(ras,"sd", na.rm = TRUE))[1,]
+#   
+#   (ras-ras_mean)/ras_sd
+# }
 
 train_test <- function(len, prop){
   sample(c(TRUE,FALSE), size = len, prob = c(prop, 1-prop),replace = TRUE)
@@ -116,26 +118,19 @@ ces <- vec2poly(c(
   
 ), crs = 2056)
 
-st_write(ces, "data-out/ces.gpkg", "aoi",append = FALSE)
+# st_write(ces, "data-out/ces.gpkg", "aoi",append = FALSE)
 
 
 tm_shape(ces) + tm_borders()
 
 
 
-r1961_full <- rast("data-out/1961.tif")
+r1961_full <- rast("data-out/prepared1/1961.tif")
+r1999_full <- rast("data-out/prepared1/1999.tif")
+
 
 r1961 <- mask(r1961_full, vect(ces))
-# plot(r1961)
-
-# ces_bb <- llur2poly(2706340.286,1143997.584,2706452.327,1144104.838)
-
-# ces_bb <- llur2poly(2706224,1143730,2706566,1143982)
-
-
-
-# tm_shape(r1961) + tm_raster()
-
+r1999 <- mask(r1999_full, vect(ces))
 
 
 
@@ -184,19 +179,17 @@ get_features <- function(
   
   # names(ras_edges) <- "edges_dist"
   
-  ras_stack <- rast(c(focal_ras, roughness))
-  # browser()
+  names(ras) <- "original"
+  ras_stack <- rast(c(focal_ras, roughness, ras))
   normalize_minmax(ras_stack)
   }
 
 
-r1961_stack <- get_features(r1961, 3, progress = TRUE)
-# hist(r1961_stack)
-r1961_stack <- rast("data-tmp/r1961_stack.tif")
+radii <- c(3, 5, 10)
 
-
-plot(r1961_stack)
-
+r1961_stack <- get_features(r1961_full, radii, progress = TRUE)
+r1999_stack <- get_features(r1999_full, radii, progress = TRUE)
+## Continue here! (do the same for 1999+)
 
 ################################################################################
 ## Import Train / Test Data
@@ -219,121 +212,107 @@ train_test_sf <- lapply(lyrs, \(x){
 unique(train_test_sf$class)
 
 
-# writeRaster(r1961_stack, filename = paste0("data-out/tmp/features/", names(r1961_stack), ".tif"),overwrite = TRUE)
-
 
 
 ################################################################################
 ## Extract features to points and split data
 ################################################################################
 
-train_test_df <- extract2(r1961_stack, train_test_sf) |> 
-  select(-year) |> 
-  mutate(class = as.factor(class)) |> 
-  cbind(st_coordinates(train_test_sf)) # this is for mlr3 and might be an issue for other approaches (formula: class~.)
+train_test_sf <- train_test_sf |> 
+  mutate(class = as.factor(class))
 
+train_test_1961 <- train_test_sf |> 
+  filter(year == 1961) |>
+  select(-year)
 
-train_test_df <- train_test_df |> 
-  na.omit() |> 
-  group_by(class) |> 
-  mutate(train = train_test(n(),.75)) |> 
-  ungroup()
+train_test_1999 <- train_test_sf |> 
+  filter(year == 1999) |>
+  select(-year)
 
+# repeat for 1999 from here
+train_test_df <- extract2(r1961_stack, train_test_sf) 
+
+# train_test_df <- train_test_df |> 
+#   na.omit() |> 
+#   group_by(class) |> 
+#   mutate(train = train_test(n(),.75)) |> 
+#   ungroup()
+
+ggplot(train_test_df, aes(ras_sd_3, ras_mean_3)) +
+  geom_point(aes(color = class)) 
 
 # the number of samples class should be propotional to the expected
 # amount of area per class
 fct_count(train_test_df$class,prop = TRUE)
 
-train <- train_test_df |> 
-  filter(train) |> 
-  select(-train)
+# train <- train_test_df |> 
+#   filter(train) |> 
+#   select(-train)
 
-test <- train_test_df |> 
-  filter(!train)|> 
-  select(-train)
+# test <- train_test_df |> 
+#   filter(!train)|> 
+#   select(-train)
 
-nrow(train)/nrow(train_test_df)
-
-
-
-# plot(train_test_df)
+# nrow(train)/nrow(train_test_df)
 
 ################################################################################
-## Make model (mlr3)
+## Train the model
 ################################################################################
-library(mlr3)               # unified interface to machine learning algorithms
-library(mlr3learners)       # most important machine learning algorithms
-library(mlr3extralearners)  # access to even more learning algorithms
-library(mlr3spatiotempcv)   # spatio-temporal resampling strategies
-library(mlr3tuning)         # hyperparameter tuning
-library(mlr3viz)            # plotting functions for mlr3 objects
-library(mlr3spatial)
 
-# 1. create task (mlr3spatiotempcv)
-task = as_task_classif_st(
-  train, 
-  target = "class", 
-  id = "wald",
-  # positive = "wald",
-  coordinate_names = c("X", "Y"),
-  crs = "EPSG:2056",
-  coords_as_features = FALSE
-)
+library(rpart)
+library(ranger)     # ← current method
 
-# 2a: Choose a learner:
-learners_df <- mlr3extralearners::list_mlr3learners(
-  filter = list(
-    class = "classif", 
-    properties = "multiclass"
-    # properties = "twoclass"
-    ),
-  # select = c("id", "mlr3_package", "required_packages")
-  )
-
-learners_df
-
-# 2b. specify learner
-# learner = lrn("classif.log_reg", predict_type = "prob")
-learner = lrn("classif.rpart", predict_type = "prob")
+tm_shape(r1961_full) + 
+  tm_raster() +
+  tm_shape(train_test_sf) +
+  tm_dots()
 
 
 
-
-# 3. specify resampling
-# repeats was 100, took too long for rf
-resampling = mlr3::rsmp("repeated_spcv_coords", folds = 5, repeats = 100)
+# cartmodel <-  rpart(class~., data = train_test_df)
+rfmodel <-  ranger(class~., data = train_test_df)
 
 
-# run spatial cross-validation and save it to resample result glm (rr_glm)
-rr <- mlr3::resample(
-  task = task,
-  learner = learner,
-  resampling = resampling
-  )
+# r1961_pred <- predict(r1961_stack, cartmodel,  na.rm=TRUE)
+
+pfun <- \(...) {
+  predict(...)$predictions
+}
+r1961_pred <- predict(r1961_stack, rfmodel,  pfun, na.rm = TRUE)
+# r1961_pred <- mask(r1961_pred, vect(ces))
+
+# plot(r1961_pred)
+
+# writeRaster(r1961_pred[["wald"]], "data-tmp/pred_wald.tif")
 
 
-rr$score(msr("classif.ce"))
+raster2bool <- \(ras, name, thresh = .8){
+  ras <- ras[[name]]
+  
+  ras[ras < thresh] <- NA
+  ras[!is.na(ras)] <- 1
+  as.bool(ras)
+}
 
-pred <- rr$prediction()
+raster2bool_2 <- \(ras, val){
+  ras[ras != val] <- NA
+  ras
+}
 
-pred$confusion
+r1961_wald <- raster2bool_2(r1961_pred, 3)
 
-learner$train(task)
-predict(learner, test)
+# r1961_pred2 <- raster2bool(r1961_pred, "Wald")
 
-# prediction does not seem to work when the raster is in memory
-writeRaster(r1961_stack, "data-tmp/r1961_stack.tif", overwrite = TRUE)
-r1961_stack <- rast("data-tmp/r1961_stack.tif")
+plot(r1961_wald)
 
-pred_spat <- predict_spatial(r1961_stack, learner)
+################################################################################
+## Clean predictions
+################################################################################
 
-writeRaster(pred_spat, "data-tmp/r1961_pred.tif")
+# builidings_mask <- read_sf("data/ces.gpkg", "buildings_mask")
 
-pred_vec <- prediction2polygon(pred_spat)
+# r1961_wald <- mask(r1961_wald, builidings_mask, inverse = TRUE)
 
-st_write(pred_vec, "data-tmp/predict.gpkg", "1961",append = FALSE)
-
-pred$confusion
 
 
 
@@ -341,8 +320,7 @@ pred$confusion
 ## Run model on all grayscales
 ################################################################################
 
-
-tifs <- list.files("data-out", "\\.tif$", full.names = TRUE)
+tifs <- list.files("data-out/prepared1/", "\\.tif$", full.names = TRUE)
 
 library(stringr)
 names(tifs) <- basename(tifs) |> str_remove(".tif")
@@ -356,12 +334,19 @@ tifs_g <- tifs_r[nlyrs == 1]
 
 
 imap(tifs_g, \(x,y){
-  
+  # browser()
   x2 <- mask(x, vect(ces))
   
-  x_stack <- get_features(x2)
-  writeRaster(x_stack, glue("data-intermediate/grayscale_features/{y}.tif"), overwrite = TRUE)
+  x_stack <- get_features(x2, radii = radii)
+  # x_pred <- predict(x_stack, rfmodel,  na.rm=TRUE)
+  x_pred <- predict(x_stack, rfmodel,  pfun, na.rm = TRUE)
+  
+  
+  x_pred2 <- raster2bool_2(x_pred, 3)
+  
+  writeRaster(x_pred2, glue("data-intermediate/grayscale_predicted_rf/{y}.tif"), datatype="INT1U", overwrite = TRUE)
   
 }, .progress = TRUE)
+
 
 

@@ -1,6 +1,11 @@
 data-intermediate
 data-out
 data-tmp
+data
+swissimageHist
 .Rhistory
 .Rproj.user
 *.qgz
+*.tif
+.ipynb_checkpoints
+__pycache__
