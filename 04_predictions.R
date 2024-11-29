@@ -3,10 +3,11 @@ source("00_libraries.R")
 # 01 Import data
 # 02 Get Features
 r1961_stack <- rast("data-intermediate/r1961_stack.tif")
+r1999_stack <- rast("data-intermediate/r1999_stack.tif")
 
 # 03 Train Model
 load("data-intermediate/rfmodel_1961.rds")
-load("data-intermediate/rfmodel_1961_small.rds")
+load("data-intermediate/rfmodel_1999.rds")
 
 
 
@@ -16,16 +17,20 @@ load("data-intermediate/rfmodel_1961_small.rds")
 
 
 # r1961_pred <- predict(r1961_stack, cartmodel,  na.rm=TRUE)
+# ranger 0.17.0 using 2 threads (default).
+# Change with num.threads in ranger() and predict(), 
+# options(Ncpus = N), options(ranger.num.threads = N) or environment variable R_RANGER_NUM_THREADS.
 
-pfun <- \(...) {
-  predict(...)$predictions
-}
-r1961_pred <- predict(r1961_stack, rfmodel_1961_small,  pfun, na.rm = TRUE)
+options(ranger.num.threads = 128)
+
+r1961_pred <- predict(r1961_stack, rfmodel_1961,  pfun, na.rm = TRUE)
+r1999_pred <- predict(r1999_stack, rfmodel_1961,  pfun, na.rm = TRUE)
+
 # r1961_pred <- mask(r1961_pred, vect(ces))
 
 # plot(r1961_pred)
 
-# writeRaster(r1961_pred[["wald"]], "data-tmp/pred_wald.tif")
+# writeRaster(r1961_pred[["Wald"]], "data-intermediate/1961.tif", overwrite = TRUE)
 
 
 # this funtion is used by the CART model
@@ -37,16 +42,19 @@ r1961_pred <- predict(r1961_stack, rfmodel_1961_small,  pfun, na.rm = TRUE)
 #   as.bool(ras)
 # }
 
-raster2bool_2 <- \(ras, val){
+raster2bool_2 <- \(ras, class){
+  lvs <- levels(ras)[[1]]
+  val <- lvs$value[lvs$class == class]
+  stopifnot(length(val) == 1)
   ras[ras != val] <- NA
   ras
 }
 
-r1961_wald <- raster2bool_2(r1961_pred, 3)
+r1961_wald <- raster2bool_2(r1961_pred, "Wald")
+r1999_wald <- raster2bool_2(r1999_pred, "Wald")
 
-# r1961_pred2 <- raster2bool(r1961_pred, "Wald")
 
-plot(r1961_wald)
+
 
 ################################################################################
 ## Clean predictions

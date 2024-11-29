@@ -56,8 +56,10 @@ raster_bool2poly <- function(ras_bool){
 
 
 normalize_minmax <- \(ras){
+  # mm <- global(ras, c("min","max"))
+    
+  setMinMax(ras)
   mm <- minmax(ras)
-  
   (ras-mm[1,])/(mm[2,]- mm[1,])
 }
 
@@ -109,3 +111,71 @@ vec2poly <- \(x, crs, byrow = TRUE){
     st_geometry("geom")
   
 }
+
+
+
+# to get the features
+
+get_features <- function(
+    ras, 
+    progress = FALSE){
+
+      radii = c(3, 5)
+      funs = c("sd", "mean", "max", "min")
+  
+  names(ras) <- ""
+  focal_ras <- expand_grid(radii, funs) |> 
+    pmap(\(radii, funs){
+      # browser()
+      
+      focal_circle(ras, radii, funs)
+    }, .progress = progress)
+  
+  names(ras) <- "original"
+  ras_stack <- rast(c(focal_ras, ras))
+  normalize_minmax(ras_stack)
+}
+
+
+
+get_features_rgb <- function(
+    ras, 
+    progress = FALSE){
+
+      # browser()
+
+      g <- 2.2
+
+      ras <- normalize_minmax(ras)
+
+      Y <- 0.2126 * ras[["r"]]^g + 0.7152 * ras[["g"]]^g + 0.0722 * ras[["b"]]^g
+
+      L <- 116* Y^(1/3)-16
+
+      L <- normalize_minmax(L)
+
+      names(L) <- ""
+
+
+      grayscale_features <- get_features(L)
+
+      y <- c(grayscale_features, ras)
+
+      y
+    }
+
+# to make predict() work on a ranger model
+pfun <- \(...) {
+  predict(...)$predictions
+}
+
+
+
+ces <- vec2poly(c(
+  2707294, 1143470,
+  2706034, 1144930,
+  2704954, 1144050,
+  2706259, 1142535,
+  2707294, 1143470
+  
+), crs = 2056)

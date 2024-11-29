@@ -5,7 +5,7 @@ source("00_libraries.R")
 # 02 Get Features
 
 r1961_stack <- rast("data-intermediate/r1961_stack.tif")
-
+r1999_stack <- rast("data-intermediate/r1999_stack.tif")
 
 ################################################################################
 ## Import Train / Test Data
@@ -25,7 +25,7 @@ train_test_sf <- lapply(lyrs, \(x){
   st_sf()
 
 
-unique(train_test_sf$class)
+table(train_test_sf$class, train_test_sf$year)
 
 
 
@@ -45,30 +45,9 @@ train_test_1999 <- train_test_sf |>
   filter(year == 1999) |>
   select(-year)
 
-# CONTINUE HERE: repeat for 1999
+
 train_test_1961_df <- extract2(r1961_stack, train_test_1961) 
-
-# train_test_df <- train_test_df |> 
-#   na.omit() |> 
-#   group_by(class) |> 
-#   mutate(train = train_test(n(),.75)) |> 
-#   ungroup()
-
-# the number of samples class should be propotional to the expected
-# amount of area per class
-# fct_count(train_test_1961_df$class,prop = TRUE)
-
-# train <- train_test_df |> 
-#   filter(train) |> 
-#   select(-train)
-
-# test <- train_test_df |> 
-#   filter(!train)|> 
-#   select(-train)
-
-# nrow(train)/nrow(train_test_df)
-
-
+train_test_1999_df <- extract2(r1999_stack, train_test_1999) 
 
 ################################################################################
 ## Train the model
@@ -83,8 +62,14 @@ rfmodel_1961 <-  ranger(
   importance = "permutation" # or "impurity"
 )
 
+rfmodel_1999 <-  ranger(
+  class~., 
+  data = train_test_1999_df, 
+  importance = "permutation" # or "impurity"
+)
 
 save(rfmodel_1961, file = "data-intermediate/rfmodel_1961.rds")
+save(rfmodel_1999, file = "data-intermediate/rfmodel_1999.rds")
 
 
 ################################################################################
@@ -115,14 +100,14 @@ ggplot(importance_df, aes(x = reorder(Feature, Importance), y = Importance)) +
 
 
 
-rfmodel_1961_small <-  ranger(
-  class~., 
-  data = train_test_1961_df[,c("class", importance_df$Feature[1:7])], 
-  importance = "permutation" # or "impurity"
-)
+# rfmodel_1961_small <-  ranger(
+#   class~., 
+#   data = train_test_1961_df[,c("class", importance_df$Feature[1:7])], 
+#   importance = "permutation" # or "impurity"
+# )
 
 
-save(rfmodel_1961_small, file = "data-intermediate/rfmodel_1961_small.rds")
+# save(rfmodel_1961_small, file = "data-intermediate/rfmodel_1961_small.rds")
 
 
 
