@@ -14,6 +14,7 @@ st_layers("data/training.gpkg")$name -> lyrs
 
 
 
+
 train_test_sf <- lapply(lyrs, \(x){
   st_read("data/training.gpkg", x) |> 
     mutate(year_class = x) |> 
@@ -23,6 +24,12 @@ train_test_sf <- lapply(lyrs, \(x){
   do.call(rbind, args = _) |> 
   separate_wider_delim(year_class, "_",names = c("year", "class"), too_many = "merge") |> 
   st_sf()
+
+
+# str_detect(lyrs, "Wiese_Weide2")
+train_test_sf$class <- str_remove(train_test_sf$class, "\\d")
+
+unique(train_test_sf$class)
 
 
 table(train_test_sf$class, train_test_sf$year)
